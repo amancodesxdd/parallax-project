@@ -1,0 +1,4 @@
+<<<<<<< HEAD
+=======
+hello rose wassup how are you ?
+>>>>>>> b1c427b811ad7f85b6d57ace8b3bc9ce152b0b71

@@ -1,0 +1,33 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Verdict {
+  APPROVE
+  REVIEW
+  REJECT
+}
+
+model Scan {
+  id                String   @id @default(uuid())
+  documentType      String
+  extractedData     Json
+  validationResults Json
+  tamperingFlags    Json
+  faceScore         Float
+  riskScore         Float
+  verdict           Verdict
+  createdAt         DateTime @default(now())
+}
+
+model Blacklist {
+  id             String   @id @default(uuid())
+  documentNumber String   @unique
+  reason         String
+  createdAt      DateTime @default(now())
+}
