@@ -142,7 +142,7 @@ app.get("/health", async (req, res) => {
 
   // 1. Check PostgreSQL Database Connection via Prisma
   try {
-    await prisma.$queryRawSELECT 1;
+    await prisma.$queryRaw`SELECT 1`;
     healthStatus.services.database = "CONNECTED";
   } catch (err) {
     healthStatus.services.database = "DISCONNECTED";
