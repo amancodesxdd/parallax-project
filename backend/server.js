@@ -128,6 +128,40 @@ app.get("/api/scans/:id/pdf", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+// GET /health - System Uptime & Dependency Status
+app.get("/health", async (req, res) => {
+  const healthStatus = {
+    status: "UP",
+    timestamp: new Date().toISOString(),
+    services: {
+      database: "UNKNOWN",
+      pythonEngine: "UNKNOWN"
+    }
+  };
+
+  // 1. Check PostgreSQL Database Connection via Prisma
+  try {
+    await prisma.$queryRawSELECT 1;
+    healthStatus.services.database = "CONNECTED";
+  } catch (err) {
+    healthStatus.services.database = "DISCONNECTED";
+    healthStatus.status = "DEGRADED";
+  }
+
+  // 2. Check Python Environment
+  try {
+    await execPromise("python --version");
+    healthStatus.services.pythonEngine = "AVAILABLE";
+  } catch (err) {
+    healthStatus.services.pythonEngine = "UNAVAILABLE";
+    healthStatus.status = "DEGRADED";
+  }
+
+  const httpCode = healthStatus.status === "UP" ? 200 : 503;
+  res.status(httpCode).json(healthStatus);
+});
+
 // Start listening on Port 5000
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
