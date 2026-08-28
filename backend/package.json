@@ -9,12 +9,12 @@
     "prisma:generate": "prisma generate"
   },
   "dependencies": {
+    "@prisma/client": "^5.22.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.0",
     "express": "^4.19.0"
   },
   "devDependencies": {
-    "@prisma/client": "^7.10.0",
     "@types/cors": "^2.8.0",
     "@types/express": "^4.17.0",
     "@types/node": "^20",
@@ -27,5 +27,11 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs"
+  "type": "commonjs",
+  "allowScripts": {
+    "prisma@5.22.0": true,
+    "@prisma/engines@5.22.0": true,
+    "@prisma/client@5.22.0": true,
+    "esbuild@0.28.2": true
+  }
 }
