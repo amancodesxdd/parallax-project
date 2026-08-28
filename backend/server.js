@@ -170,3 +170,20 @@ app.get("/api/stats", async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+async function runAiDetection(imagePath) {
+  if (!imagePath) return { aiScore: 0, isAiGenerated: false, flags: [] };
+  try {
+    const { stdout } = await execPromise(`python ai_detector.py "${imagePath}"`);
+    return JSON.parse(stdout);
+  } catch (error) {
+    console.error("AI Detection Execution Error:", error);
+    return { aiScore: 0, isAiGenerated: false, flags: ["AI_DETECTION_FAILED"] };
+  }
+}
+// Call AI detection alongside OpenCV tampering check
+const aiResult = await runAiDetection(req.body.imagePath);
+
+if (aiResult.isAiGenerated) {
+  riskScore += aiResult.aiScore;
+  tamperingFlags.push(...aiResult.flags);
+}
