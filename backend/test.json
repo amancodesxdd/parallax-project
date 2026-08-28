@@ -1,0 +1,21 @@
+[
+{
+  "documentType": "PASSPORT",
+  "documentNumber": "AB1234567",
+  "expiryDate": "2030-01-01",
+  "dob": "1995-05-20",
+  "gender": "M",
+  "nationality": "IND",
+  "faceScore": 0.95
+},
+
+{
+  "documentType": "PASSPORT",
+  "documentNumber": "AB1234564",
+  "expiryDate": "2030-01-01",
+  "dob": "1995-05-20",
+  "gender": "M",
+  "nationality": "UGA",
+  "faceScore": 0.95
+}
+]
