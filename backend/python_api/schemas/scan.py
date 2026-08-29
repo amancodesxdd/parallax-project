@@ -2,6 +2,13 @@ from typing import Any, Dict, Optional
 
 from pydantic import BaseModel
 
+logger = logging.getLogger(__name__)
+
+logger.info(
+    "Scan started: %s",
+    scan_id
+)
+
 
 class ScanResponse(BaseModel):
     success: bool

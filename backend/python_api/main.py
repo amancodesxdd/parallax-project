@@ -1,4 +1,5 @@
 import logging
+import time
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from utils.response_formatter import error_response
+from utils.logger import setup_logging
+
+setup_logging()
 
 
 logging.basicConfig(level=logging.INFO)
@@ -38,6 +42,57 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def log_api_requests(
+    request: Request,
+    call_next,
+):
+    """
+    Log every incoming API request and
+    its response status.
+    """
+
+    start_time = time.perf_counter()
+
+    logger.info(
+        "API request: %s %s",
+        request.method,
+        request.url.path,
+    )
+
+    try:
+
+        response = await call_next(request)
+
+        elapsed_time = (
+            time.perf_counter() - start_time
+        )
+
+        logger.info(
+            "API response: %s %s | status=%s | time=%.3fs",
+            request.method,
+            request.url.path,
+            response.status_code,
+            elapsed_time,
+        )
+
+        return response
+
+    except Exception:
+
+        elapsed_time = (
+            time.perf_counter() - start_time
+        )
+
+        logger.exception(
+            "API failed: %s %s | time=%.3fs",
+            request.method,
+            request.url.path,
+            elapsed_time,
+        )
+
+        raise
 
 
 @app.get("/api/health", tags=["System"])
