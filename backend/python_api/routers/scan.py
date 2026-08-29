@@ -5,6 +5,9 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from services.orchestration_service import run_scan_pipeline
 
+from services.request_validation import validate_scan_request
+
+
 
 router = APIRouter(
     prefix="/api/scan",
@@ -53,6 +56,11 @@ async def scan_document(
                 status_code=400,
                 detail="Document is required"
             )
+
+        await validate_scan_request(
+            document=document,
+            selfie=selfie,
+)
 
         # -----------------------------------------
         # Run complete orchestration pipeline
