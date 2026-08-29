@@ -20,6 +20,8 @@ from utils.response_formatter import error_response
 
 logging.basicConfig(level=logging.INFO)
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(
     title="AI-Based Fake Identity & Document Screening System",
     version="1.0.0",
@@ -51,6 +53,10 @@ async def request_validation_exception_handler(
     request: Request,
     exc: RequestValidationError,
 ):
+    """
+    Handle invalid API requests.
+    """
+
     return error_response(
         message="Request validation failed",
         code="VALIDATION_ERROR",
@@ -64,22 +70,67 @@ async def global_exception_handler(
     request: Request,
     exc: Exception,
 ):
+    """
+    Handle unexpected backend errors.
+
+    Technical details are logged internally.
+    A safe message is returned to the frontend.
+    """
+
+    logger.exception(
+        "Unhandled server error on %s %s",
+        request.method,
+        request.url.path,
+    )
+
     return error_response(
-        message="Internal server error",
+        message="An unexpected server error occurred",
         code="INTERNAL_SERVER_ERROR",
         status_code=500,
     )
+
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(
     request: Request,
     exc: HTTPException,
 ):
+    """
+    Convert FastAPI HTTP errors into the standard
+    Parallax API response format.
+    """
+
+    if isinstance(exc.detail, dict):
+
+        message = exc.detail.get(
+            "message",
+            "Request failed",
+        )
+
+        code = exc.detail.get(
+            "code",
+            "HTTP_ERROR",
+        )
+
+        details = exc.detail.get(
+            "details"
+        )
+
+    else:
+
+        message = str(exc.detail)
+
+        code = "HTTP_ERROR"
+
+        details = None
+
     return error_response(
-        message=str(exc.detail),
-        code="HTTP_ERROR",
+        message=message,
+        code=code,
+        details=details,
         status_code=exc.status_code,
     )
+    
 
 app.include_router(ocr_router)
 app.include_router(upload_router)

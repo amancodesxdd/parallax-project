@@ -72,10 +72,11 @@ async def verify_document_face(
     except HTTPException:
         raise
 
-    except Exception:
+    except Exception as exc:
 
         logger.exception(
-            "Face verification failed"
+            "Face verification failed: %s",
+            exc,
         )
 
         return error_response(

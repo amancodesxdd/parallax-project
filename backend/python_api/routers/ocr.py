@@ -70,10 +70,11 @@ async def perform_ocr(
     except HTTPException:
         raise
 
-    except Exception:
+    except Exception as exc:
 
         logger.exception(
-            "OCR request failed"
+            "OCR processing failed %s",
+            exc,
         )
 
         return error_response(
