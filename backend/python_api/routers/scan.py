@@ -7,6 +7,10 @@ from services.orchestration_service import run_scan_pipeline
 
 from services.request_validation import validate_scan_request
 
+from utils.response_formatter import (
+    success_response,
+    error_response,
+)
 
 
 router = APIRouter(
@@ -51,11 +55,7 @@ async def scan_document(
         # Basic document validation
         # -----------------------------------------
 
-        if not document.filename:
-            raise HTTPException(
-                status_code=400,
-                detail="Document is required"
-            )
+        
 
         await validate_scan_request(
             document=document,
@@ -80,7 +80,10 @@ async def scan_document(
             scan_id
         )
 
-        return result
+        return success_response(
+            message="Document scan completed",
+            data=result,
+)
 
     except HTTPException:
         raise
@@ -92,7 +95,8 @@ async def scan_document(
             scan_id
         )
 
-        raise HTTPException(
-            status_code=500,
-            detail="Document scanning failed"
-        )
+        return error_response(
+    message="Document scanning failed",
+    code="SCAN_FAILED",
+    status_code=500,
+)

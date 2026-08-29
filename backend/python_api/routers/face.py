@@ -1,79 +1,85 @@
 import logging
 
-from fastapi import (
-    APIRouter,
-    File,
-    HTTPException,
-    UploadFile
-)
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
-from services.face_service import (
-    verify_face
+from services.face_service import verify_face
+from services.request_validation import validate_image
+
+from utils.response_formatter import (
+    success_response,
+    error_response,
 )
 
 
 router = APIRouter(
-    prefix="/api",
-    tags=["Face Verification"]
+    prefix="/api/face",
+    tags=["Face"],
 )
 
 logger = logging.getLogger(__name__)
 
 
-@router.post("/face")
-async def face_verification(
+@router.post("")
+async def verify_document_face(
     document: UploadFile = File(...),
-    selfie: UploadFile = File(...)
+    selfie: UploadFile = File(...),
 ):
+    """
+    Face verification API.
+
+    Flow:
+
+    Document + Selfie
+          ↓
+    Request Validation
+          ↓
+    Face Verification Service
+          ↓
+    Standard Response
+    """
+
+    logger.info(
+        "Face verification request started"
+    )
 
     try:
 
-        if not document.filename:
-            raise HTTPException(
-                status_code=400,
-                detail="Document image is required."
-            )
+        # -----------------------------------------
+        # TASK 6 — REQUEST VALIDATION
+        # -----------------------------------------
 
-        if not selfie.filename:
-            raise HTTPException(
-                status_code=400,
-                detail="Selfie image is required."
-            )
+        await validate_image(document)
+        await validate_image(selfie)
+
+        # -----------------------------------------
+        # TASK 3 — FACE VERIFICATION
+        # -----------------------------------------
 
         result = await verify_face(
             document,
-            selfie
+            selfie,
         )
 
-        return {
-            "success": True,
-            "message": (
-                "Face verification completed"
-            ),
-            "data": result
-        }
+        # -----------------------------------------
+        # TASK 7 — RESPONSE FORMATTING
+        # -----------------------------------------
 
-    except ValueError as exc:
+        return success_response(
+            message="Face verification completed",
+            data=result,
+        )
 
-        raise HTTPException(
-            status_code=400,
-            detail=str(exc)
-        ) from exc
+    except HTTPException:
+        raise
 
-    except RuntimeError as exc:
-
-        raise HTTPException(
-            status_code=503,
-            detail=str(exc)
-        ) from exc
-
-    except Exception as exc:
+    except Exception:
 
         logger.exception(
             "Face verification failed"
         )
 
-        raise HTTPException(
+        return error_response(
+            message="Face verification failed",
+            code="FACE_VERIFICATION_FAILED",
             status_code=500,
-            detail="Face verification failed."
-        ) from exc
+        )
