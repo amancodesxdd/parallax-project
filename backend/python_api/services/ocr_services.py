@@ -7,6 +7,8 @@ from fastapi import UploadFile
 from azure.core.credentials import AzureKeyCredential
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 
+from utils.fallback_handler import get_ocr_fallback
+
 
 load_dotenv()
 
@@ -45,48 +47,89 @@ async def extract_text_from_document(
     Azure Document Intelligence and return
     structured OCR information.
 
-    This function belongs to Person 4's
-    OCR integration layer.
-
-    Person 5 can consume the returned data
-    for validation/database/risk processing.
+    If Azure OCR fails, fallback mock data
+    is returned so that the rest of the
+    pipeline can continue during development
+    and integration testing.
     """
 
+    # =================================================
+    # BASIC INPUT VALIDATION
+    # =================================================
+
     if not file:
-        raise ValueError("Document file is required.")
+        raise ValueError(
+            "Document file is required."
+        )
 
     if not file.filename:
-        raise ValueError("Document filename is missing.")
+        raise ValueError(
+            "Document filename is missing."
+        )
 
-    # Read uploaded file
+    # =================================================
+    # READ UPLOADED FILE
+    # =================================================
+
     file_bytes = await file.read()
 
     if not file_bytes:
-        raise ValueError("Uploaded document is empty.")
+        raise ValueError(
+            "Uploaded document is empty."
+        )
 
     logger.info(
         "Sending document to Azure OCR: %s",
         file.filename
     )
 
-    # Send document to Azure Document Intelligence
-    poller = client.begin_analyze_document(
-        MODEL_ID,
-        analyze_request=file_bytes,
-        content_type=file.content_type
-    )
+    # =================================================
+    # AZURE OCR
+    # =================================================
 
-    # Wait for Azure processing to finish
-    result = poller.result()
+    try:
 
-    logger.info(
-        "Azure OCR completed: %s",
-        file.filename
-    )
+        poller = client.begin_analyze_document(
+            MODEL_ID,
+            analyze_request=file_bytes,
+            content_type=file.content_type
+        )
 
-    # ------------------------------------------------
-    # Extract structured fields
-    # ------------------------------------------------
+        # Wait for Azure processing to finish
+
+        result = poller.result()
+
+        logger.info(
+            "Azure OCR completed: %s",
+            file.filename
+        )
+
+    except Exception as exc:
+
+        # ---------------------------------------------
+        # AZURE FAILED
+        # ---------------------------------------------
+
+        logger.exception(
+            "Azure OCR failed for %s",
+            file.filename
+        )
+
+        fallback_result = get_ocr_fallback(
+            reason=str(exc)
+        )
+
+        # Preserve original filename
+
+        fallback_result["filename"] = (
+            file.filename
+        )
+
+        return fallback_result
+
+    # =================================================
+    # EXTRACT STRUCTURED FIELDS
+    # =================================================
 
     extracted_fields = {}
 
@@ -94,17 +137,23 @@ async def extract_text_from_document(
 
         document = result.documents[0]
 
-        extracted_fields["document_type"] = (
-            document.doc_type
-        )
+        extracted_fields["document_type"] = {
+            "value": document.doc_type,
+            "confidence": 1.0
+        }
 
         fields = document.fields or {}
 
         for field_name, field in fields.items():
 
-            value = getattr(field, "value", None)
+            value = getattr(
+                field,
+                "value",
+                None
+            )
 
             if value is None:
+
                 value = getattr(
                     field,
                     "content",
@@ -116,20 +165,21 @@ async def extract_text_from_document(
                 "confidence": field.confidence
             }
 
-    # ------------------------------------------------
-    # Raw OCR text
-    # ------------------------------------------------
+    # =================================================
+    # RAW OCR TEXT
+    # =================================================
 
     raw_text = result.content or ""
 
-    # ------------------------------------------------
-    # Return standardized response
-    # ------------------------------------------------
+    # =================================================
+    # RETURN AZURE RESULT
+    # =================================================
 
     return {
         "provider": "azure-document-intelligence",
         "model": MODEL_ID,
         "filename": file.filename,
         "raw_text": raw_text,
-        "fields": extracted_fields
+        "fields": extracted_fields,
+        "fallback": False
     }
