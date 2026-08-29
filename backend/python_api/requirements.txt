@@ -1,13 +1,11 @@
 fastapi
 uvicorn[standard]
-python-multipart
 python-dotenv
 httpx
 pydantic
 sqlalchemy
 azure-ai-documentintelligence
 azure-core
-python-dotenv
 boto3
 python-dotenv
 python-multipart
