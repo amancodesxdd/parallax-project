@@ -18,6 +18,14 @@ from fastapi.responses import JSONResponse
 
 from utils.response_formatter import error_response
 from utils.logger import setup_logging
+from utils.rate_limiter import RateLimiter
+
+rate_limiter = RateLimiter()
+
+
+
+
+
 
 setup_logging()
 
@@ -32,6 +40,9 @@ app = FastAPI(
 )
 
 
+
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -42,6 +53,57 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def rate_limit_requests(
+    request: Request,
+    call_next,
+):
+    """
+    Limit requests from each client IP.
+    """
+
+    # Get client IP
+
+    if request.client:
+        client_id = request.client.host
+    else:
+        client_id = "unknown"
+
+    # Check rate limit
+
+    if not rate_limiter.is_allowed(
+        client_id
+    ):
+
+        retry_after = (
+            rate_limiter.get_retry_after(
+                client_id
+            )
+        )
+
+        return JSONResponse(
+            status_code=429,
+            content={
+                "success": False,
+                "message": (
+                    "Too many requests. "
+                    "Please try again later."
+                ),
+                "error": {
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "retry_after": retry_after,
+                },
+            },
+            headers={
+                "Retry-After": str(
+                    retry_after
+                )
+            },
+        )
+
+    return await call_next(request)
+
 
 @app.middleware("http")
 async def log_api_requests(
