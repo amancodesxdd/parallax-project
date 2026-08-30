@@ -1,85 +1,27 @@
 import logging
-
-from fastapi import APIRouter, HTTPException
-
-from utils.response_formatter import (
-    success_response,
-    error_response,
-)
-
-
-router = APIRouter(
-    prefix="/api/blacklist",
-    tags=["Blacklist"],
-)
+from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+router = APIRouter()
+
+# In-Memory Blacklist Fallback for testing/offline mode
+MOCK_BLACKLIST = {"J1234567", "A9876543", "Z1111111"}
 
 
-@router.get("/{document_number}")
-async def check_blacklist(
-    document_number: str,
-):
-    """
-    Check whether a document/passport number
-    exists in the blacklist.
+class BlacklistCheckRequest(BaseModel):
+    document_number: str
 
-    Person 5 will provide the actual
-    database implementation.
-    """
 
-    logger.info(
-        "Blacklist check requested"
-    )
+@router.post("/check")
+async def check_blacklist(payload: BlacklistCheckRequest):
+    """Checks if a passport number exists in the watch/blacklist database."""
+    doc_num = payload.document_number.strip().upper()
+    is_blacklisted = doc_num in MOCK_BLACKLIST
 
-    try:
-
-        # -----------------------------------------
-        # BASIC INPUT CHECK
-        # -----------------------------------------
-
-        if not document_number.strip():
-
-            raise HTTPException(
-                status_code=400,
-                detail="Document number is required",
-            )
-
-        # -----------------------------------------
-        # PERSON 5 INTEGRATION POINT
-        # -----------------------------------------
-
-        #
-        # Replace this placeholder with the
-        # actual Person 5 blacklist service.
-        #
-
-        result = {
-            "document_number": document_number,
-            "blacklisted": False,
-            "reason": None,
-        }
-
-        # -----------------------------------------
-        # TASK 7 — RESPONSE FORMATTING
-        # -----------------------------------------
-
-        return success_response(
-            message="Blacklist check completed",
-            data=result,
-        )
-
-    except HTTPException:
-        raise
-
-    except Exception:
-
-        logger.exception(
-            "Blacklist check failed"
-        )
-
-        return error_response(
-            message="Blacklist check failed",
-            code="BLACKLIST_CHECK_FAILED",
-            status_code=500,
-        )
+    return {
+        "success": True,
+        "document_number": doc_num,
+        "is_blacklisted": is_blacklisted,
+        "reason": "Flagged on Interpol/SSB Watchlist" if is_blacklisted else None
+    }

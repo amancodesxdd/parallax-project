@@ -1,191 +1,55 @@
 import logging
-from typing import Any, Dict, Optional
+from fastapi import UploadFile
 
+from services.request_validation import validate_document_input
+from services.storage_service import save_file_locally
 from services.ocr_services import extract_text_from_document
-
+from services.validation_services import validate_passport_fields
+from services.face_service import verify_face_match
 
 logger = logging.getLogger(__name__)
 
 
-async def run_scan_pipeline(
-    document,
-    selfie=None,
-    document_type: Optional[str] = None
-) -> Dict[str, Any]:
-
-    logger.info("Starting scan pipeline")
-
-    try:
-
-        # ==========================================
-        # STEP 1 — OCR
-        # ==========================================
-
-        logger.info("Running OCR")
-
-        ocr_result = await extract_text_from_document(
-            document
-        )
-
-        logger.info("OCR completed")
-
-        # ==========================================
-        # STEP 2 — Person 5 processing
-        # ==========================================
-
-        person5_result = await process_with_person5(
-            ocr_result=ocr_result,
-            document_type=document_type
-        )
-
-        # ==========================================
-        # STEP 3 — Face verification
-        # ==========================================
-
-        face_result = None
-
-        if selfie is not None:
-
-            try:
-
-                # Import here to avoid unnecessary
-                # circular imports
-
-                from services.face_service import verify_face
-
-                # Reset files before using them again
-
-                await document.seek(0)
-                await selfie.seek(0)
-
-                logger.info(
-                    "Running face verification"
-                )
-
-                face_result = await verify_face(
-                    document,
-                    selfie
-                )
-
-            except Exception as exc:
-
-                logger.warning(
-                    "Face verification failed: %s",
-                    exc
-                )
-
-                face_result = {
-                    "success": False,
-                    "matched": False,
-                    "face_score": 0.0,
-                    "confidence": 0.0,
-                    "message": "Face verification unavailable"
-                }
-
-        # ==========================================
-        # STEP 4 — Compile everything
-        # ==========================================
-
-        final_result = compile_scan_result(
-            ocr_result=ocr_result,
-            person5_result=person5_result,
-            face_result=face_result
-        )
-
-        logger.info(
-            "Scan pipeline completed"
-        )
-
-        return {
-            "success": True,
-            "message": "Document scan completed",
-            "data": final_result
-        }
-
-    except Exception as exc:
-
-        logger.exception(
-            "Scan pipeline failed"
-        )
-
-        return {
-            "success": False,
-            "message": "Scan pipeline failed",
-            "error": str(exc)
-        }
-
-
-async def process_with_person5(
-    ocr_result: Dict[str, Any],
-    document_type: Optional[str] = None
-) -> Dict[str, Any]:
-
+async def run_full_pipeline(document_file: UploadFile, selfie_file: UploadFile = None) -> dict:
     """
-    Integration point for Person 5.
-
-    Person 5 can later connect:
-
-    - validation
-    - database
-    - blacklist
-    - tampering detection
-    - risk scoring
-    - verdict
-    - history
+    Executes core 4-module pipeline:
+    Input Validation -> Storage -> Tesseract OCR -> Rules Engine -> Face Verification -> Risk Scoring.
     """
+    logger.info("Executing screening pipeline for: %s", document_file.filename)
 
-    logger.info(
-        "Sending OCR result to Person 5"
-    )
+    # Module 0: Input Validation & Persistence
+    await validate_document_input(document_file)
+    saved_path = await save_file_locally(document_file)
+
+    # Module 1: OCR Extraction
+    ocr_result = await extract_text_from_document(document_file)
+
+    # Module 2: Rule Validation
+    val_result = validate_passport_fields(ocr_result.get("fields", {}))
+
+    # Module 3 & 4: Face Verification & Composite Risk Scoring
+    face_result = await verify_face_match(document_file, selfie_file)
+
+    val_score = val_result["validation_score"]
+    face_score = face_result["face_score"]
+    tamper_score = 100  # Default clean baseline score
+
+    # Risk Formula = 100 - (Val 40% + Tamper 40% + Face 20%)
+    composite_risk = round(100 - (val_score * 0.40 + tamper_score * 0.40 + face_score * 0.20), 2)
+
+    # Tri-Tier Verdict Logic
+    if composite_risk <= 30:
+        verdict = "APPROVE"
+    elif composite_risk <= 60:
+        verdict = "REVIEW"
+    else:
+        verdict = "REJECT"
 
     return {
-        "success": True,
-
-        "document_type": document_type,
-
-        "extracted_data": ocr_result,
-
-        "validation_results": {},
-
-        "tampering_flags": [],
-
-        "risk_score": None,
-
-        "verdict": None,
-
-        "processed_by": "person5-placeholder"
-    }
-
-
-def compile_scan_result(
-    ocr_result: Dict[str, Any],
-    person5_result: Dict[str, Any],
-    face_result: Optional[Dict[str, Any]]
-) -> Dict[str, Any]:
-
-    return {
-
-        "ocr": ocr_result,
-
-        "validation": person5_result.get(
-            "validation_results",
-            {}
-        ),
-
-        "tampering": person5_result.get(
-            "tampering_flags",
-            []
-        ),
-
-        "face": face_result,
-
-        "risk": {
-            "score": person5_result.get(
-                "risk_score"
-            ),
-
-            "verdict": person5_result.get(
-                "verdict"
-            )
-        }
+        "verdict": verdict,
+        "risk_score": composite_risk,
+        "file_path": saved_path,
+        "ocr_data": ocr_result,
+        "validation_results": val_result,
+        "face_match_results": face_result,
     }

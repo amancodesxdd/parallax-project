@@ -1,84 +1,30 @@
 import logging
-
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, UploadFile, File, HTTPException, status
 
 from services.ocr_services import extract_text_from_document
-from services.request_validation import validate_document
-
-from utils.response_formatter import (
-    success_response,
-    error_response,
-)
-
-
-router = APIRouter(
-    prefix="/api/ocr",
-    tags=["OCR"],
-)
 
 logger = logging.getLogger(__name__)
+router = APIRouter()
 
 
-@router.post("")
-async def perform_ocr(
-    document: UploadFile = File(...),
-):
-    """
-    OCR API endpoint.
-
-    Flow:
-
-    Document
-       ↓
-    Request Validation
-       ↓
-    OCR Service
-       ↓
-    Standard Response
-    """
-
-    logger.info(
-        "OCR request started: %s",
-        document.filename,
-    )
-
+@router.post("/extract")
+async def extract_ocr(file: UploadFile = File(...)):
+    """Runs local Tesseract OCR on a document image and returns extracted fields."""
     try:
-
-        # -----------------------------------------
-        # TASK 6 — REQUEST VALIDATION
-        # -----------------------------------------
-
-        await validate_document(document)
-
-        # -----------------------------------------
-        # TASK 2 — OCR INTEGRATION
-        # -----------------------------------------
-
-        result = await extract_text_from_document(
-            document
+        ocr_result = await extract_text_from_document(file)
+        return {
+            "success": True,
+            "message": "OCR text extraction completed",
+            "data": ocr_result
+        }
+    except ValueError as val_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "BAD_REQUEST", "message": str(val_err)}
         )
-
-        # -----------------------------------------
-        # TASK 7 — RESPONSE FORMATTING
-        # -----------------------------------------
-
-        return success_response(
-            message="OCR completed successfully",
-            data=result,
-        )
-
-    except HTTPException:
-        raise
-
     except Exception as exc:
-
-        logger.exception(
-            "OCR processing failed %s",
-            exc,
-        )
-
-        return error_response(
-            message="OCR processing failed",
-            code="OCR_FAILED",
-            status_code=500,
+        logger.exception("OCR router extraction failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "OCR_FAILED", "message": str(exc)}
         )

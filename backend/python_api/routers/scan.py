@@ -1,102 +1,38 @@
 import logging
-from uuid import uuid4
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
-
-from services.orchestration_service import run_scan_pipeline
-
-from services.request_validation import validate_scan_request
-
-from utils.response_formatter import (
-    success_response,
-    error_response,
-)
-
-
-router = APIRouter(
-    prefix="/api/scan",
-    tags=["Scan"]
-)
+from services.orchestration_service import run_full_pipeline
 
 logger = logging.getLogger(__name__)
+router = APIRouter()
 
 
 @router.post("")
+@router.post("/")
 async def scan_document(
     document: UploadFile = File(...),
-    selfie: UploadFile | None = File(None),
+    selfie: UploadFile = File(None),
 ):
     """
-    Main document scanning endpoint.
-
-    The actual processing is handled by
-    orchestration_service.py.
-
-    Pipeline:
-
-    Document
-       ↓
-    OCR
-       ↓
-    Person 5 processing
-       ↓
-    Face verification
-       ↓
-    Combined response
+    Main Screening Endpoint: Orchestrates OCR, database validation, 
+    forensics checks, face matching, and risk scoring.
     """
-
-    scan_id = str(uuid4())
-
-    logger.info("Scan started: %s", scan_id)
-
     try:
-
-        # -----------------------------------------
-        # Basic document validation
-        # -----------------------------------------
-
-        
-
-        await validate_scan_request(
-            document=document,
-            selfie=selfie,
-)
-
-        # -----------------------------------------
-        # Run complete orchestration pipeline
-        # -----------------------------------------
-
-        result = await run_scan_pipeline(
-            document=document,
-            selfie=selfie
+        result = await run_full_pipeline(document_file=document, selfie_file=selfie)
+        return {
+            "success": True,
+            "message": "Document screening completed successfully",
+            "data": result
+        }
+    except ValueError as val_err:
+        logger.warning(f"Validation error during scan: {str(val_err)}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVALID_INPUT", "message": str(val_err)}
         )
-
-        # Add scan ID to the final response
-
-        result["scan_id"] = scan_id
-
-        logger.info(
-            "Scan completed successfully: %s",
-            scan_id
+    except Exception as exc:
+        logger.exception("Error executing full document scan pipeline")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "SCAN_FAILED", "message": str(exc)}
         )
-
-        return success_response(
-            message="Document scan completed",
-            data=result,
-)
-
-    except HTTPException:
-        raise
-
-    except Exception:
-
-        logger.exception(
-            "Scan failed: %s",
-            scan_id
-        )
-
-        return error_response(
-    message="Document scanning failed",
-    code="SCAN_FAILED",
-    status_code=500,
-)
