@@ -1,16 +1,27 @@
 import logging
+import os
 import re
+
 import cv2
 import numpy as np
 import pytesseract
+from dotenv import load_dotenv
 from fastapi import UploadFile
 
 from utils.fallback_handler import get_ocr_fallback
 
 logger = logging.getLogger(__name__)
 
-# Windows Tesseract Path override if binary is not in system PATH:
-# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Load backend/.env (parent of parent of this file) so TESSERACT_CMD resolves
+# regardless of the process working directory.
+_BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+load_dotenv(os.path.join(_BACKEND_ROOT, ".env"))
+
+_tesseract_cmd = os.environ.get("TESSERACT_CMD")
+if _tesseract_cmd and os.path.exists(_tesseract_cmd):
+    pytesseract.pytesseract.tesseract_cmd = _tesseract_cmd
+else:
+    logger.warning("TESSERACT_CMD not set or not found; relying on system PATH.")
 
 
 def parse_passport_text(raw_text: str) -> dict:

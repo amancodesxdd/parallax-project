@@ -7,13 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from routers import (
-    blacklist_router,
     face_router,
-    history_router,
     ocr_router,
-    scan_router,
     upload_router,
-    validate_router,
 )
 from utils.logger import setup_logging
 from utils.rate_limiter import RateLimiter
@@ -145,11 +141,8 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# ROUTER INCLUSIONS
-app.include_router(scan_router, prefix="/api/scan", tags=["Scanning Engine"])
+# ROUTER INCLUSIONS (forensic engine only; /api/scan, validation, blacklist,
+# and history are served exclusively by the Node gateway server.js)
 app.include_router(ocr_router, prefix="/api/ocr", tags=["OCR Extraction"])
 app.include_router(face_router, prefix="/api/face", tags=["Face Matching"])
-app.include_router(validate_router, prefix="/api/validate", tags=["Validation Rules"])
 app.include_router(upload_router, prefix="/api/upload", tags=["File Upload"])
-app.include_router(history_router, prefix="/api/history", tags=["Scan History"])
-app.include_router(blacklist_router, prefix="/api/blacklist", tags=["Blacklist Database"])
