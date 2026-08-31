@@ -48,7 +48,7 @@ function validateNationality(nationality) {
 // STEPS 6 & 7: RISK ENGINE & VERDICT LOGIC
 // ==========================================
 
-function calculateRiskScore({ documentNumber, expiryDate, dob, gender, nationality, faceScore, isBlacklisted }) {
+function calculateRiskScore({ documentNumber, expiryDate, dob, gender, nationality, faceScore, isBlacklisted, tamperScore = 0 }) {
   let validationErrors = 0;
   let tamperingFlagsCount = 0;
   let faceMismatchScore = 0;
@@ -80,10 +80,15 @@ function calculateRiskScore({ documentNumber, expiryDate, dob, gender, nationali
     flags.push("UNSUPPORTED_NATIONALITY");
   }
 
-  // --- Category 2: Blacklist Check (40% Weight Category) ---
+  // --- Category 2: Blacklist + Forensic/Tamper Check (40% Weight Category) ---
   if (isBlacklisted) {
     tamperingFlagsCount += 100;
     flags.push("BLACKLISTED_DOCUMENT");
+  }
+
+  // Forensic penalty from the Python engine (tampering + AI-generation scores)
+  if (tamperScore > 0) {
+    tamperingFlagsCount += tamperScore;
   }
 
   // --- Category 3: Face Score Check (20% Weight Category) ---

@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js",
+    "dev": "node server.js",
+    "start": "node server.js",
+    "build": "echo \"No build step required (CommonJS server.js)\"",
     "prisma:generate": "prisma generate"
   },
   "dependencies": {
@@ -13,6 +13,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.0",
     "express": "^4.19.0",
+    "multer": "^2.3.0",
     "pdfkit": "^0.20.1"
   },
   "devDependencies": {
