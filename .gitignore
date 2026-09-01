@@ -8,3 +8,4 @@ logs/
 *.log
 dist/
 *.tsbuildinfo
+.tanstack/

@@ -14,7 +14,7 @@ enum Verdict {
 }
 
 model Scan {
-  id                String   @id @default(uuid())
+  id                String    @id @default(uuid())
   documentType      String
   extractedData     Json
   validationResults Json
@@ -22,12 +22,27 @@ model Scan {
   faceScore         Float
   riskScore         Float
   verdict           Verdict
-  createdAt         DateTime @default(now())
+  needsReview       Boolean   @default(false)
+  reviewedBy        String?
+  reviewedAt        DateTime?
+  createdAt         DateTime  @default(now())
 }
 
 model Blacklist {
   id             String   @id @default(uuid())
   documentNumber String   @unique
+  documentType   String?
   reason         String
+  addedBy        String?
   createdAt      DateTime @default(now())
+}
+
+model AuditEvent {
+  id        String   @id @default(uuid())
+  action    String
+  actor     String?
+  resource  String
+  result    String
+  detail    Json?
+  createdAt DateTime @default(now())
 }

@@ -44,6 +44,23 @@ const prisma = new PrismaClient();
 app.use(cors());
 app.use(express.json());
 
+// Audit logging helper — records compliance events for the audit trail.
+async function logAudit({ action, actor, resource, result, detail }) {
+  try {
+    await prisma.auditEvent.create({
+      data: {
+        action,
+        actor: actor || "system@identra",
+        resource: resource || action,
+        result: result || "SUCCESS",
+        detail: detail ? { ...detail } : undefined,
+      },
+    });
+  } catch (error) {
+    console.error("Failed to write audit event:", error);
+  }
+}
+
 // Main Verification Endpoint
 app.post("/api/scan", async (req, res) => {
   try {
@@ -118,6 +135,13 @@ app.post("/api/scan", async (req, res) => {
     });
 
     // 4. Return Final Response
+    await logAudit({
+      action: "VERIFICATION_RUN",
+      resource: "VERIFICATION",
+      result: verdict,
+      detail: { scanId: scanRecord.id, riskScore: parseFloat(riskScore), isBlacklisted },
+    });
+
     res.status(201).json({
       success: true,
       data: scanRecord
@@ -206,6 +230,13 @@ app.post("/api/scan/file",
       });
 
       // 6. Return verdict + full forensic breakdown
+      await logAudit({
+        action: "VERIFICATION_RUN",
+        resource: "VERIFICATION",
+        result: verdict,
+        detail: { scanId: scanRecord.id, riskScore: parseFloat(riskScore), isBlacklisted },
+      });
+
       res.status(201).json({
         success: true,
         message: "Document screening completed successfully",
@@ -249,6 +280,13 @@ app.get("/api/scans/:id/pdf", async (req, res) => {
     }
 
     const doc = new PDFDocument({ margin: 50 });
+
+    await logAudit({
+      action: "REPORT_GENERATE",
+      resource: "REPORT",
+      result: "SUCCESS",
+      detail: { scanId: scan.id, verdict: scan.verdict },
+    });
 
     // FORCE DIRECT DOWNLOAD TO PC (attachment instead of inline)
     res.setHeader("Content-Type", "application/pdf");
@@ -334,6 +372,52 @@ if (require.main === module) {
 
 module.exports = app;
 
+// GET /api/scans/:id — fetch a single scan record
+app.get("/api/scans/:id", async (req, res) => {
+  try {
+    const scan = await prisma.scan.findUnique({ where: { id: req.params.id } });
+    if (!scan) {
+      return res.status(404).json({ success: false, error: "Scan record not found" });
+    }
+    res.json({ success: true, data: scan });
+  } catch (error) {
+    console.error("Error fetching scan:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/scans/:id/review — flag or unflag a scan for manual review
+app.post("/api/scans/:id/review", async (req, res) => {
+  try {
+    const flag = req.body?.flag === true;
+    const existing = await prisma.scan.findUnique({ where: { id: req.params.id } });
+    if (!existing) {
+      return res.status(404).json({ success: false, error: "Scan record not found" });
+    }
+
+    const updated = await prisma.scan.update({
+      where: { id: req.params.id },
+      data: {
+        needsReview: flag,
+        reviewedAt: new Date(),
+        reviewedBy: req.body?.actor || "Priyadarshani B."
+      }
+    });
+
+    await logAudit({
+      action: flag ? "REVIEW_FLAG" : "REVIEW_CLEAR",
+      resource: "VERIFICATION",
+      result: flag ? "FLAGGED" : "CLEARED",
+      detail: { scanId: updated.id, verdict: updated.verdict, riskScore: updated.riskScore },
+    });
+
+    res.json({ success: true, message: flag ? "Verification flagged for manual review" : "Review flag cleared", data: updated });
+  } catch (error) {
+    console.error("Error updating review flag:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // GET ENDPOINT: Fetch all scan records (Scan History) with status filter + pagination
 app.get("/api/scans", async (req, res) => {
   try {
@@ -375,6 +459,7 @@ app.get("/api/stats", async (req, res) => {
     const approved = await prisma.scan.count({ where: { verdict: "APPROVE" } });
     const review = await prisma.scan.count({ where: { verdict: "REVIEW" } });
     const rejected = await prisma.scan.count({ where: { verdict: "REJECT" } });
+    const blacklisted = await prisma.blacklist.count();
 
     res.json({
       success: true,
@@ -382,11 +467,294 @@ app.get("/api/stats", async (req, res) => {
         totalScans,
         approved,
         review,
-        rejected
+        rejected,
+        blacklisted
       }
     });
   } catch (error) {
     console.error("Error fetching stats:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// =============================================
+// BLACKLIST API (full CRUD against PostgreSQL)
+// =============================================
+
+// GET /api/blacklist — list entries with optional search
+app.get("/api/blacklist", async (req, res) => {
+  try {
+    const search = req.query.search ? String(req.query.search) : "";
+    const where = search
+      ? {
+          OR: [
+            { documentNumber: { contains: search, mode: "insensitive" } },
+            { reason: { contains: search, mode: "insensitive" } },
+          ],
+        }
+      : {};
+
+    const entries = await prisma.blacklist.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+    });
+
+    res.json({ success: true, data: entries });
+  } catch (error) {
+    console.error("Error fetching blacklist:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/blacklist/check — check a document number against the watchlist
+app.post("/api/blacklist/check", async (req, res) => {
+  try {
+    const { documentNumber } = req.body || {};
+    if (!documentNumber) {
+      return res
+        .status(400)
+        .json({ success: false, error: "documentNumber is required" });
+    }
+
+    const entry = await prisma.blacklist.findUnique({
+      where: { documentNumber: String(documentNumber) },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        isBlacklisted: !!entry,
+        documentNumber: String(documentNumber),
+        reason: entry?.reason || null,
+        matchId: entry?.id || null,
+      },
+    });
+  } catch (error) {
+    console.error("Error checking blacklist:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// POST /api/blacklist — add a new entry
+app.post("/api/blacklist", async (req, res) => {
+  try {
+    const { documentNumber, reason, addedBy, documentType } = req.body || {};
+    if (!documentNumber) {
+      return res
+        .status(400)
+        .json({ success: false, error: "documentNumber is required" });
+    }
+
+    const exists = await prisma.blacklist.findUnique({
+      where: { documentNumber: String(documentNumber) },
+    });
+    if (exists) {
+      return res
+        .status(409)
+        .json({ success: false, error: "Document number is already blacklisted" });
+    }
+
+    const entry = await prisma.blacklist.create({
+      data: {
+        documentNumber: String(documentNumber),
+        documentType: documentType || null,
+        reason: reason || "Manual entry",
+        addedBy: addedBy || null,
+      },
+    });
+
+    await logAudit({
+      action: "BLACKLIST_ADD",
+      resource: "BLACKLIST",
+      result: "SUCCESS",
+      detail: { documentNumber: entry.documentNumber, documentType: documentType || null },
+    });
+
+    res.status(201).json({ success: true, data: entry });
+  } catch (error) {
+    console.error("Error adding blacklist entry:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/blacklist/:id — remove an entry
+app.delete("/api/blacklist/:id", async (req, res) => {
+  try {
+    const entry = await prisma.blacklist.findUnique({ where: { id: req.params.id } });
+    if (!entry) {
+      return res.status(404).json({ success: false, error: "Blacklist entry not found" });
+    }
+
+    await prisma.blacklist.delete({ where: { id: req.params.id } });
+
+    await logAudit({
+      action: "BLACKLIST_REMOVE",
+      resource: "BLACKLIST",
+      result: "SUCCESS",
+      detail: { documentNumber: entry.documentNumber },
+    });
+
+    res.json({ success: true, message: "Blacklist entry removed" });
+  } catch (error) {
+    console.error("Error deleting blacklist entry:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// =============================================
+// AUDIT TRAIL API
+// =============================================
+
+// GET /api/audit — fetch audit events with filtering + pagination
+app.get("/api/audit", async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 100);
+    const skip = (page - 1) * limit;
+
+    const where = {};
+    if (req.query.resource && String(req.query.resource) !== "ALL") {
+      where.resource = String(req.query.resource);
+    }
+    if (req.query.result && String(req.query.result) !== "ALL") {
+      where.result = String(req.query.result);
+    }
+    if (req.query.actor) {
+      where.actor = { contains: String(req.query.actor), mode: "insensitive" };
+    }
+
+    const [total, events] = await Promise.all([
+      prisma.auditEvent.count({ where }),
+      prisma.auditEvent.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip,
+      }),
+    ]);
+
+    res.json({
+      success: true,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.max(1, Math.ceil(total / limit)),
+      },
+      data: events,
+    });
+  } catch (error) {
+    console.error("Error fetching audit trail:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// DELETE /api/audit/:id — remove a rogue audit entry (supervisor action)
+app.delete("/api/audit/:id", async (req, res) => {
+  try {
+    const event = await prisma.auditEvent.findUnique({ where: { id: req.params.id } });
+    if (!event) {
+      return res.status(404).json({ success: false, error: "Audit event not found" });
+    }
+
+    await prisma.auditEvent.delete({ where: { id: req.params.id } });
+    res.json({ success: true, message: "Audit event removed" });
+  } catch (error) {
+    console.error("Error deleting audit event:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// =============================================
+// IDENTRA AI ASSISTANT (grounded in real data)
+// =============================================
+
+// POST /api/assistant — answer questions about the live verification data.
+// Simple intent matching over stats, scans, blacklist and the risk model.
+app.post("/api/assistant", async (req, res) => {
+  try {
+    const text = String(req.body?.message || "").trim();
+    if (!text) {
+      return res.status(400).json({ success: false, error: "message is required" });
+    }
+    const q = text.toLowerCase();
+
+    // 1. Stats intents
+    if (/(total|how many|volume|all|count).*(verif|screen|scan)/.test(q) || /verif.*total/.test(q)) {
+      const [total, approved, review, rejected] = await Promise.all([
+        prisma.scan.count(),
+        prisma.scan.count({ where: { verdict: "APPROVE" } }),
+        prisma.scan.count({ where: { verdict: "REVIEW" } }),
+        prisma.scan.count({ where: { verdict: "REJECT" } }),
+      ]);
+      return res.json({
+        success: true,
+        data: {
+          answer: `There are ${total} recorded verifications. ${approved} approved (${total ? Math.round((approved / total) * 100) : 0}%), ${review} under review and ${rejected} rejected.`,
+        },
+      });
+    }
+
+    if (/(blacklist|watchlist|blocked|flagged)/.test(q)) {
+      const [count, sample] = await Promise.all([
+        prisma.blacklist.count(),
+        prisma.blacklist.findMany({ orderBy: { createdAt: "desc" }, take: 3 }),
+      ]);
+      const sampleText = sample.length
+        ? ` Recent entries: ${sample.map((s) => s.documentNumber).join(", ")}.`
+        : " No entries recorded yet.";
+      return res.json({
+        success: true,
+        data: { answer: `There are ${count} document numbers on the blacklist.${sampleText}` },
+      });
+    }
+
+    if (/(reject|verdict|trigger|score|risk|how.*decide|model)/.test(q)) {
+      return res.json({
+        success: true,
+        data: {
+          answer:
+            "Every scan is scored from 0–100. Scores of 0–30 approve, 31–60 go to manual review, and 61–100 are rejected. The score combines validation errors (40%), tampering/blacklist signals (40%) and face-match confidence (20%). Flags such as INVALID_PASSPORT_FORMAT, EXPIRED_DOCUMENT, BLACKLISTED_DOCUMENT or tampering indicators raise the risk.",
+        },
+      });
+    }
+
+    // 2. Specific record lookups (scan id, short id, doc number)
+    const idToken = (text.match(/\b[a-zA-Z0-9-]{8,36}\b/) || [])[0];
+    if (idToken) {
+      const [byId, byQuery] = await Promise.all([
+        prisma.scan.findFirst({
+          where: { OR: [{ id: idToken }, { id: { startsWith: idToken } }] },
+        }),
+        prisma.scan.findMany({
+          where: { extractedData: { path: ["documentNumber"], equals: idToken.toUpperCase() } },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        }),
+      ]);
+      const scan = byId || byQuery[0];
+      if (scan) {
+        const flags = (scan.tamperingFlags || []).length ? scan.tamperingFlags.join(", ") : "none";
+        return res.json({
+          success: true,
+          data: {
+            answer: `Record ${scan.id.slice(0, 8)} was verified on ${scan.createdAt.toISOString()}. Verdict: ${scan.verdict}, risk score ${scan.riskScore}/100, face match ${Math.round(scan.faceScore * 100)}%. Tampering flags: ${flags}.`,
+          },
+        });
+      }
+    }
+
+    // 3. Fallback with live summary
+    const total = await prisma.scan.count();
+    const blacklist = await prisma.blacklist.count();
+    return res.json({
+      success: true,
+      data: {
+        answer: `I could not map that to a specific record. Current workspace summary: ${total} verifications on file and ${blacklist} blacklist entries. Ask about totals, the risk model, a document number, or the watchlist.`,
+      },
+    });
+  } catch (error) {
+    console.error("Error in assistant:", error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { Sparkles, Send } from "lucide-react";
+import { Sparkles, Send, LoaderCircle } from "lucide-react";
 import { AppShell, PageTitle } from "@/components/AppShell";
+import { askAssistant } from "@/api";
 
 export const Route = createFileRoute("/identra-ai")({
   head: () => ({
@@ -23,7 +24,7 @@ export const Route = createFileRoute("/identra-ai")({
 });
 
 const prompts = [
-  "Why was SNR-2026-1004 flagged?",
+  "How many verifications are recorded?",
   "What triggers a REJECT verdict?",
   "How is tampering detected?",
   "What's on the blacklist?",
@@ -39,18 +40,27 @@ function IdentraAI() {
     },
   ]);
   const [input, setInput] = useState("");
+  const [pending, setPending] = useState(false);
 
-  const send = (text: string) => {
-    if (!text.trim()) return;
-    setMessages((m) => [
-      ...m,
-      { role: "user", text },
-      {
-        role: "ai",
-        text: "Based on the current screening data, this record scored in the low-risk band with a clear blacklist status and no tampering signals detected.",
-      },
-    ]);
+  const send = async (text: string) => {
+    if (!text.trim() || pending) return;
+    setMessages((m) => [...m, { role: "user", text }]);
     setInput("");
+    setPending(true);
+    try {
+      const answer = await askAssistant(text);
+      setMessages((m) => [...m, { role: "ai", text: answer }]);
+    } catch {
+      setMessages((m) => [
+        ...m,
+        {
+          role: "ai",
+          text: "I couldn't reach the backend. Make sure the API server is running, then try again.",
+        },
+      ]);
+    } finally {
+      setPending(false);
+    }
   };
 
   return (
@@ -67,7 +77,7 @@ function IdentraAI() {
                 </span>
               )}
               <p
-                className={`max-w-lg rounded-xl px-4 py-2.5 text-sm ${
+                className={`max-w-lg whitespace-pre-wrap rounded-xl px-4 py-2.5 text-sm ${
                   m.role === "ai"
                     ? "bg-accent text-accent-foreground"
                     : "bg-primary text-primary-foreground"
@@ -77,6 +87,11 @@ function IdentraAI() {
               </p>
             </div>
           ))}
+          {pending && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <LoaderCircle className="size-4 animate-spin" /> Thinking...
+            </div>
+          )}
         </div>
 
         <div className="mt-6 flex flex-wrap gap-2">
@@ -84,7 +99,8 @@ function IdentraAI() {
             <button
               key={p}
               onClick={() => send(p)}
-              className="rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              disabled={pending}
+              className="rounded-full bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
             >
               {p}
             </button>
@@ -102,13 +118,16 @@ function IdentraAI() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             aria-label="Ask Identra AI"
+            placeholder="Ask about a record, stats, or the risk model..."
             className="flex-1 rounded-lg border border-border bg-card px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-ring/40"
           />
           <button
             type="submit"
-            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+            disabled={pending || !input.trim()}
+            className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <Send className="size-4" /> Send
+            {pending ? <LoaderCircle className="size-4 animate-spin" /> : <Send className="size-4" />}{" "}
+            Send
           </button>
         </form>
       </div>

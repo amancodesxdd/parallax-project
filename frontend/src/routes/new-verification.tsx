@@ -1,7 +1,8 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { ArrowLeft, ChevronDown, FileText, UploadCloud, Play } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { setPendingScan } from "@/lib/pendingScan";
 
 export const Route = createFileRoute("/new-verification")({
   head: () => ({
@@ -23,12 +24,24 @@ export const Route = createFileRoute("/new-verification")({
 });
 
 function NewVerification() {
-  const [fileName, setFileName] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const [file, setFile] = useState<File | null>(null);
+  const [documentType, setDocumentType] = useState("Passport (International)");
   const [faceMatch, setFaceMatch] = useState(true);
+
+  const startScreening = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file) return;
+    setPendingScan({ file, documentType, faceMatch });
+    navigate({
+      to: "/screening",
+      search: { documentType, faceMatch },
+    });
+  };
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-2xl">
+      <form className="mx-auto max-w-2xl" onSubmit={startScreening}>
         <div className="surface-card p-8">
           <Link
             to="/"
@@ -44,7 +57,11 @@ function NewVerification() {
           <p className="label-caps mt-6">Document Type</p>
           <div className="relative mt-2">
             <FileText className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-primary" />
-            <select className="w-full appearance-none rounded-lg border border-border bg-card py-2.5 pl-9 pr-9 text-sm outline-none focus:ring-2 focus:ring-ring/40">
+            <select
+              value={documentType}
+              onChange={(e) => setDocumentType(e.target.value)}
+              className="w-full appearance-none rounded-lg border border-border bg-card py-2.5 pl-9 pr-9 text-sm outline-none focus:ring-2 focus:ring-ring/40"
+            >
               <option>Passport (International)</option>
               <option>National ID</option>
               <option>Driver&apos;s License</option>
@@ -57,7 +74,7 @@ function NewVerification() {
           <label className="mt-2 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-primary/40 bg-accent/40 px-6 py-10 text-center transition-colors hover:bg-accent/70">
             <UploadCloud className="size-6 text-primary" />
             <span className="text-sm font-medium">
-              {fileName ?? "Drag & drop your document here"}
+              {file?.name ?? "Drag & drop your document here"}
             </span>
             <span className="text-xs text-muted-foreground">or</span>
             <span className="rounded-md bg-card px-3 py-1.5 text-xs font-semibold shadow-sm">
@@ -68,8 +85,9 @@ function NewVerification() {
             </span>
             <input
               type="file"
+              accept=".jpg,.jpeg,.png,.webp,.pdf"
               className="hidden"
-              onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)}
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
           </label>
 
@@ -79,6 +97,7 @@ function NewVerification() {
               <p className="text-xs text-muted-foreground">Opens webcam for live selfie capture.</p>
             </div>
             <button
+              type="button"
               role="switch"
               aria-checked={faceMatch}
               onClick={() => setFaceMatch(!faceMatch)}
@@ -90,17 +109,18 @@ function NewVerification() {
             </button>
           </div>
 
-          <Link
-            to="/screening"
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+          <button
+            type="submit"
+            disabled={!file}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Play className="size-4" /> Start Screening
-          </Link>
+          </button>
           <p className="mt-3 text-center text-xs text-muted-foreground">
             Upload a document to begin.
           </p>
         </div>
-      </div>
+      </form>
     </AppShell>
   );
 }

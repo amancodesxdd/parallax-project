@@ -1,9 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Search, Download, ChevronLeft, ChevronRight } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Search, Download, ChevronLeft, ChevronRight, FileText, Flag } from "lucide-react";
 import { AppShell, PageTitle } from "@/components/AppShell";
 import { VerdictBadge } from "@/components/VerdictBadge";
-import { verificationHistory } from "@/lib/mock-data";
+import { LoadingState, ErrorState, EmptyState } from "@/components/AsyncState";
+import { fetchScans, downloadPdfReport, formatDate } from "@/api";
 
 export const Route = createFileRoute("/history")({
   head: () => ({
@@ -24,20 +26,57 @@ export const Route = createFileRoute("/history")({
   component: HistoryPage,
 });
 
-function HistoryPage() {
-  const [query, setQuery] = useState("");
-  const [verdict, setVerdict] = useState("All");
+const PAGE_SIZE = 10;
+const VERDICT_OPTIONS = ["All", "APPROVE", "REVIEW", "REJECT"];
 
-  const rows = useMemo(
-    () =>
-      verificationHistory.filter(
-        (v) =>
-          (verdict === "All" || v.verdict === verdict) &&
-          (v.name.toLowerCase().includes(query.toLowerCase()) ||
-            v.id.toLowerCase().includes(query.toLowerCase())),
-      ),
-    [query, verdict],
-  );
+function HistoryPage() {
+  const [page, setPage] = useState(1);
+  const [verdict, setVerdict] = useState("All");
+  const [query, setQuery] = useState("");
+
+  const { isLoading, isError, error, data, refetch } = useQuery({
+    queryKey: ["scans", "history", page, verdict],
+    queryFn: () => fetchScans({ page, limit: PAGE_SIZE, status: verdict === "All" ? undefined : verdict }),
+  });
+
+  const rows = useMemo(() => {
+    const scans = data?.data ?? [];
+    if (!query.trim()) return scans;
+    const q = query.toLowerCase();
+    return scans.filter(
+      (scan) =>
+        scan.id.toLowerCase().includes(q) ||
+        String(scan.extractedData?.documentNumber ?? "").toLowerCase().includes(q),
+    );
+  }, [data, query]);
+
+  const exportCsv = () => {
+    const header = ["Verification ID", "Document Number", "Verdict", "Risk Score", "Date", "Review Flag"];
+    const lines = (data?.data ?? []).map((scan) =>
+      [
+        scan.id,
+        String(scan.extractedData?.documentNumber ?? ""),
+        scan.verdict,
+        scan.riskScore,
+        scan.createdAt,
+        scan.needsReview ? "FLAGGED" : "",
+      ]
+        .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+        .join(","),
+    );
+    const blob = new Blob([[header.join(","), ...lines].join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "snare-verification-history.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const total = data?.pagination?.total ?? 0;
+  const pages = data?.pagination?.pages ?? 1;
 
   return (
     <AppShell>
@@ -47,7 +86,10 @@ function HistoryPage() {
           hi="इतिहास"
           sub="Browse and export past verification records."
         />
-        <button className="flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90">
+        <button
+          onClick={exportCsv}
+          className="flex items-center gap-2 rounded-lg bg-primary px-3.5 py-2 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+        >
           <Download className="size-4" /> Export CSV
         </button>
       </div>
@@ -58,8 +100,11 @@ function HistoryPage() {
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <input
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name or ID..."
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Search by ID or document number..."
               className="w-full rounded-lg border border-border bg-card py-2 pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring/40"
             />
           </div>
@@ -67,69 +112,107 @@ function HistoryPage() {
             Verdict:
             <select
               value={verdict}
-              onChange={(e) => setVerdict(e.target.value)}
+              onChange={(e) => {
+                setVerdict(e.target.value);
+                setPage(1);
+              }}
               className="rounded-lg border border-border bg-card px-2 py-1.5 text-sm font-medium text-foreground outline-none"
             >
-              {["All", "Pass", "Fail", "Pending"].map((v) => (
+              {VERDICT_OPTIONS.map((v) => (
                 <option key={v}>{v}</option>
               ))}
             </select>
           </label>
         </div>
 
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left">
-                {["Name", "Verification ID", "Verdict", "Date", "Verified By"].map((h) => (
-                  <th key={h} className="label-caps whitespace-nowrap py-2 pr-4">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((v) => (
-                <tr key={v.id} className="border-b border-border/60 last:border-0">
-                  <td className="py-3 pr-4 font-semibold">
-                    {v.name}
-                    <span className="ml-2 rounded bg-success-soft px-1.5 py-0.5 text-[10px] font-bold text-success">
-                      {v.tag}
-                    </span>
-                  </td>
-                  <td className="py-3 pr-4 font-mono text-xs text-muted-foreground">{v.id}</td>
-                  <td className="py-3 pr-4">
-                    <VerdictBadge verdict={v.verdict} />
-                  </td>
-                  <td className="py-3 pr-4 text-muted-foreground">{v.date}</td>
-                  <td className="py-3 pr-4">
-                    <span className="flex items-center gap-2">
-                      <span className="flex size-6 items-center justify-center rounded-full bg-accent text-[10px] font-semibold text-accent-foreground">
-                        {v.verifiedBy.slice(0, 2).toUpperCase()}
-                      </span>
-                      {v.verifiedBy}
-                    </span>
-                  </td>
+        {isLoading ? (
+          <LoadingState label="Loading verification history..." />
+        ) : isError ? (
+          <ErrorState message={(error as Error)?.message} onRetry={() => refetch()} />
+        ) : rows.length === 0 ? (
+          <EmptyState message="No verifications match your filters yet." />
+        ) : (
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left">
+                  {["Verification ID", "Document", "Verdict", "Risk Score", "Date", "Actions"].map(
+                    (h) => (
+                      <th key={h} className="label-caps whitespace-nowrap py-2 pr-4">
+                        {h}
+                      </th>
+                    ),
+                  )}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {rows.map((scan) => (
+                  <tr key={scan.id} className="border-b border-border/60 last:border-0">
+                    <td className="py-3 pr-4 font-mono text-xs text-muted-foreground">
+                      {scan.id.slice(0, 13)}
+                    </td>
+                    <td className="py-3 pr-4 font-semibold">
+                      {String(scan.extractedData?.documentNumber ?? (scan.documentType || "Passport"))}
+                      <span className="ml-2 rounded bg-success-soft px-1.5 py-0.5 text-[10px] font-bold text-success">
+                        {scan.documentType}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-4">
+                      <span className="flex items-center gap-1.5">
+                        <VerdictBadge verdict={scan.verdict} />
+                        {scan.needsReview && (
+                          <span title="Flagged for manual review">
+                            <Flag className="size-3.5 text-warning-foreground" />
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-4 text-muted-foreground">{scan.riskScore}</td>
+                    <td className="py-3 pr-4 text-muted-foreground">{formatDate(scan.createdAt)}</td>
+                    <td className="py-3 pr-4">
+                      <span className="flex items-center gap-2">
+                        <Link
+                          to="/verification-complete"
+                          search={{ scanId: scan.id }}
+                          className="text-xs font-semibold text-primary hover:underline"
+                        >
+                          <FileText className="mr-1 inline size-3.5" />
+                          Report
+                        </Link>
+                        <button
+                          onClick={() => downloadPdfReport(scan.id)}
+                          aria-label={`Download PDF for ${scan.id}`}
+                          className="text-xs font-semibold text-muted-foreground hover:text-primary"
+                        >
+                          <Download className="size-3.5" />
+                        </button>
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
-            Showing 1-{rows.length} of 248 results
+            Showing {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, total)} of {total} results
           </p>
           <div className="flex items-center gap-1">
-            <PageBtn>
+            <PageBtn onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
               <ChevronLeft className="size-3.5" />
             </PageBtn>
-            <PageBtn active>1</PageBtn>
-            <PageBtn>2</PageBtn>
-            <PageBtn>3</PageBtn>
-            <span className="px-1 text-xs text-muted-foreground">…</span>
-            <PageBtn>25</PageBtn>
-            <PageBtn>
+            {Array.from({ length: Math.min(pages, 7) }, (_, i) => {
+              const start = Math.max(1, Math.min(page - 3, pages - 6));
+              const p = start + i;
+              return (
+                <PageBtn key={p} active={p === page} onClick={() => setPage(p)}>
+                  {p}
+                </PageBtn>
+              );
+            })}
+            <PageBtn onClick={() => setPage((p) => Math.min(pages, p + 1))} disabled={page >= pages}>
               <ChevronRight className="size-3.5" />
             </PageBtn>
           </div>
@@ -139,13 +222,27 @@ function HistoryPage() {
   );
 }
 
-function PageBtn({ children, active }: { children: React.ReactNode; active?: boolean }) {
+function PageBtn({
+  children,
+  active,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
   return (
     <button
+      onClick={onClick}
+      disabled={disabled}
       className={`flex size-7 items-center justify-center rounded-md border text-xs font-medium transition-colors ${
         active
           ? "border-primary bg-primary text-primary-foreground"
-          : "border-border text-muted-foreground hover:bg-muted"
+          : disabled
+            ? "cursor-not-allowed border-border text-muted-foreground/40"
+            : "border-border text-muted-foreground hover:bg-muted"
       }`}
     >
       {children}
