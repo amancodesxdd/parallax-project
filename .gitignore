@@ -6,3 +6,5 @@ __pycache__/
 uploads/
 logs/
 *.log
+dist/
+*.tsbuildinfo
