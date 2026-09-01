@@ -75,3 +75,12 @@ export async function apiDelete<T>(path: string): Promise<T> {
 export function apiBlobUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
 }
+
+// Resolves a backend-relative URL (e.g. /uploads/xxx.jpg) against the API origin
+// so linked artifacts work in dev (vite proxy) and production (absolute VITE_API_URL).
+export function resolveApiUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  if (/^https?:\/\//.test(path)) return path;
+  const origin = new URL(API_BASE_URL).origin;
+  return `${origin}${path.startsWith("/") ? path : `/${path}`}`;
+}

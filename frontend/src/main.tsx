@@ -4,6 +4,7 @@ import { RouterProvider } from "@tanstack/react-router";
 
 import "./styles.css";
 import { router } from "./router";
+import { ScanProvider } from "@/lib/scan";
 
 declare module "@tanstack/react-router" {
   interface Register {
@@ -15,6 +16,8 @@ const rootElement = document.getElementById("root")!;
 
 createRoot(rootElement).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    <ScanProvider>
+      <RouterProvider router={router} />
+    </ScanProvider>
   </StrictMode>,
 );

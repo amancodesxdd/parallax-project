@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Download, Flag, FlagOff, ShieldCheck, BatteryMedium, AlertTriangle } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { AsyncBoundary } from "@/components/AsyncState";
-import { fetchScan, reviewScan, downloadPdfReport, formatDate } from "@/api";
+import { fetchScan, reviewScan, downloadPdfReport, resolveApiUrl, formatDate } from "@/api";
 
 export const Route = createFileRoute("/verification-complete")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -160,6 +160,21 @@ function ResultCard({ scanId }: { scanId: string }) {
               <li key={f}>{f}</li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {scan.evidenceImageUrl && (
+        <div className="mt-6">
+          <p className="label-caps">Annotated Evidence</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Visual proof from the forensic engine — highlighted regions mark suspected tampering
+            and AI artifacts.
+          </p>
+          <img
+            src={resolveApiUrl(scan.evidenceImageUrl) ?? undefined}
+            alt="Annotated document with forensic highlights"
+            className="mt-3 w-full rounded-lg border border-border bg-muted"
+          />
         </div>
       )}
 

@@ -43,6 +43,7 @@ const prisma = new PrismaClient();
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "7d" }));
 
 // Audit logging helper — records compliance events for the audit trail.
 async function logAudit({ action, actor, resource, result, detail }) {
@@ -212,6 +213,10 @@ app.post("/api/scan/file",
       ];
       const allFlags = [...new Set([...flags, ...forensicFlagList])];
 
+      const evidenceImageUrl = forensics.annotatedImagePath
+        ? `/uploads/${path.basename(forensics.annotatedImagePath)}`
+        : null;
+
       // 5. Persist audit record
       const scanRecord = await prisma.scan.create({
         data: {
@@ -225,7 +230,8 @@ app.post("/api/scan/file",
           tamperingFlags: allFlags,
           faceScore: faceScoreFraction,
           riskScore: parseFloat(riskScore),
-          verdict: verdict
+          verdict: verdict,
+          evidenceImageUrl
         }
       });
 
@@ -247,6 +253,7 @@ app.post("/api/scan/file",
           faceScore: faceScoreFraction,
           extractedData,
           tamperingFlags: allFlags,
+          evidenceImageUrl,
           forensics: {
             ocr: forensics.ocr,
             ai: forensics.ai,

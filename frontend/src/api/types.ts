@@ -12,6 +12,7 @@ export type ScanRecord = {
   needsReview?: boolean;
   reviewedBy?: string | null;
   reviewedAt?: string | null;
+  evidenceImageUrl?: string | null;
   createdAt: string;
 };
 
@@ -22,6 +23,7 @@ export type ScanDetail = {
   faceScore: number;
   extractedData: Record<string, unknown>;
   tamperingFlags: string[];
+  evidenceImageUrl?: string | null;
   forensics: {
     ocr?: { raw_text?: string; fields?: Record<string, { value: string }>; ok?: boolean };
     ai?: { aiScore?: number; isAiGenerated?: boolean; flags?: string[] };

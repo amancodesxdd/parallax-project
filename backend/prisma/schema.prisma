@@ -25,6 +25,7 @@ model Scan {
   needsReview       Boolean   @default(false)
   reviewedBy        String?
   reviewedAt        DateTime?
+  evidenceImageUrl  String?
   createdAt         DateTime  @default(now())
 }
 
