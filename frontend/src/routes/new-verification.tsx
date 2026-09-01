@@ -1,7 +1,8 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { ArrowLeft, ChevronDown, FileText, UploadCloud, Play } from "lucide-react";
+import { ArrowLeft, ChevronDown, FileText, UploadCloud, Play, Loader2 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
+import { useScan, type ScanResult } from "@/lib/scan";
 
 export const Route = createFileRoute("/new-verification")({
   head: () => ({
@@ -23,12 +24,45 @@ export const Route = createFileRoute("/new-verification")({
 });
 
 function NewVerification() {
-  const [fileName, setFileName] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const { setScanResult, setScanLoading, setScanError, scanLoading, scanError } = useScan();
+  const [file, setFile] = useState<File | null>(null);
   const [faceMatch, setFaceMatch] = useState(true);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!file) {
+      setScanError("Please select a document to upload before starting.");
+      return;
+    }
+    if (scanLoading) return;
+
+    setScanLoading(true);
+    setScanError(null);
+    try {
+      const formData = new FormData();
+      formData.append("document", file);
+      formData.append("faceMatch", String(faceMatch));
+
+      const res = await fetch("/api/scan/file", { method: "POST", body: formData });
+      const body = await res.json();
+      if (!res.ok || !body?.success) {
+        throw new Error(body?.message ?? "Screening request failed. Check that the backend is running.");
+      }
+
+      const d = body.data as ScanResult;
+      setScanResult(d);
+      navigate({ to: "/screening" });
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : "Screening request failed.");
+    } finally {
+      setScanLoading(false);
+    }
+  }
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-2xl">
+      <form onSubmit={handleSubmit} className="mx-auto max-w-2xl">
         <div className="surface-card p-8">
           <Link
             to="/"
@@ -57,7 +91,7 @@ function NewVerification() {
           <label className="mt-2 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-primary/40 bg-accent/40 px-6 py-10 text-center transition-colors hover:bg-accent/70">
             <UploadCloud className="size-6 text-primary" />
             <span className="text-sm font-medium">
-              {fileName ?? "Drag & drop your document here"}
+              {file?.name ?? "Drag & drop your document here"}
             </span>
             <span className="text-xs text-muted-foreground">or</span>
             <span className="rounded-md bg-card px-3 py-1.5 text-xs font-semibold shadow-sm">
@@ -69,7 +103,8 @@ function NewVerification() {
             <input
               type="file"
               className="hidden"
-              onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)}
+              accept=".jpg,.jpeg,.png,.pdf"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
           </label>
 
@@ -79,6 +114,7 @@ function NewVerification() {
               <p className="text-xs text-muted-foreground">Opens webcam for live selfie capture.</p>
             </div>
             <button
+              type="button"
               role="switch"
               aria-checked={faceMatch}
               onClick={() => setFaceMatch(!faceMatch)}
@@ -90,17 +126,32 @@ function NewVerification() {
             </button>
           </div>
 
-          <Link
-            to="/screening"
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+          {scanError && (
+            <p className="mt-5 rounded-lg border border-destructive/30 bg-destructive-soft px-3 py-2 text-sm text-destructive">
+              {scanError}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={scanLoading}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
           >
-            <Play className="size-4" /> Start Screening
-          </Link>
+            {scanLoading ? (
+              <>
+                <Loader2 className="size-4 animate-spin" /> Screening…
+              </>
+            ) : (
+              <>
+                <Play className="size-4" /> Start Screening
+              </>
+            )}
+          </button>
           <p className="mt-3 text-center text-xs text-muted-foreground">
             Upload a document to begin.
           </p>
         </div>
-      </div>
+      </form>
     </AppShell>
   );
 }

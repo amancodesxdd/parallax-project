@@ -43,6 +43,7 @@ const prisma = new PrismaClient();
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "7d" }));
 
 // Main Verification Endpoint
 app.post("/api/scan", async (req, res) => {
@@ -206,6 +207,10 @@ app.post("/api/scan/file",
       });
 
       // 6. Return verdict + full forensic breakdown
+      const evidenceImageUrl = forensics.annotatedImagePath
+        ? `/uploads/${path.basename(forensics.annotatedImagePath)}`
+        : null;
+
       res.status(201).json({
         success: true,
         message: "Document screening completed successfully",
@@ -216,6 +221,7 @@ app.post("/api/scan/file",
           faceScore: faceScoreFraction,
           extractedData,
           tamperingFlags: allFlags,
+          evidenceImageUrl,
           forensics: {
             ocr: forensics.ocr,
             ai: forensics.ai,

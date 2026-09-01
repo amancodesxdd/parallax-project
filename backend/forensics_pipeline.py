@@ -75,8 +75,27 @@ def run_ocr(image_path):
         return {"ok": False, "raw_text": "", "fields": {}, "error": str(exc)}
 
 
-def run_ai_detection(image_path):
+def _annotate_colored(image, boxes, labels, color):
+    """Draw overlays on a BGR image. boxes is a list of (x, y, w, h)."""
+    import cv2
+    for (x, y, w, h), label in zip(boxes, labels):
+        x, y, w, h = int(x), int(y), int(w), int(h)
+        cv2.rectangle(image, (x, y), (x + w, y + h), color, 3)
+        ty = max(y - 10, 10)
+        txt_w = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0][0]
+        cv2.rectangle(image, (x, ty - 18), (x + txt_w + 6, ty + 2), color, -1)
+        cv2.putText(image, label, (x + 3, ty), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5, (255, 255, 255), 2, cv2.LINE_AA)
+
+
+def _annotated_output_path(image_path):
+    root, ext = os.path.splitext(image_path)
+    return f"{root}_annotated{ext}"
+
+
+def run_ai_detection(image_path, img_color=None):
     """FFT spectral + texture regularity analysis for AI-generated imagery."""
+    ai_regions = []
     try:
         import cv2
         import numpy as np
@@ -103,23 +122,33 @@ def run_ai_detection(image_path):
         if high_freq_power > 165 or high_freq_power < 70:
             ai_score += 45
             flags.append("SYNTHETIC_FREQUENCY_SPECTRUM_ANOMALY")
+            # Highlight the high-frequency (outer) ring region presumed synthetic.
+            ai_regions.append((w // 2 - radius, h // 2 - radius, 2 * radius, 2 * radius))
 
         laplacian_var = cv2.Laplacian(image, cv2.CV_64F).var()
         if laplacian_var < 30.0:
             ai_score += 35
             flags.append("UNNATURAL_SMOOTHNESS_NO_SENSOR_NOISE")
 
+        # Draw AI anomaly overlay if a color canvas was supplied.
+        if img_color is not None and ai_regions:
+            _annotate_colored(img_color, ai_regions,
+                              ["AI SPECTRAL ANOMALY"] * len(ai_regions), (255, 0, 255))
+
         return {
             "aiScore": ai_score,
             "isAiGenerated": ai_score >= 40,
             "flags": flags,
+            "regions": ai_regions,
         }
     except Exception as exc:
-        return {"aiScore": 0, "isAiGenerated": False, "flags": [f"AI_DETECTOR_ERROR: {str(exc)}"]}
+        return {"aiScore": 0, "isAiGenerated": False, "flags": [f"AI_DETECTOR_ERROR: {str(exc)}"], "regions": []}
 
 
-def run_tamper_detection(image_path):
+def run_tamper_detection(image_path, img_color=None):
     """Edge-discontinuity + blur/smoothing analysis for tampered documents."""
+    tamper_boxes = []
+    banner_flags = []
     try:
         import cv2
 
@@ -140,24 +169,38 @@ def run_tamper_detection(image_path):
             if w > 50 and h > 50 and (w * h) > 2500:
                 tamper_score += 40
                 flags.append("HIGH_EDGE_DISCONTINUITY_POSSIBLE_PHOTO_CUT")
-                break
+                tamper_boxes.append((x, y, w, h))
+                if tamper_score >= 40:
+                    break
 
         laplacian_var = cv2.Laplacian(img_gray, cv2.CV_64F).var()
         if laplacian_var < 50.0:
             tamper_score += 30
             flags.append("BLURRY_TEXT_OR_UNNATURAL_SMOOTHING")
+            banner_flags.append("UNNATURAL SMOOTHING / BLUR DETECTED")
+
+        # Draw tamper overlays if a color canvas was supplied.
+        if img_color is not None:
+            if tamper_boxes:
+                _annotate_colored(img_color, tamper_boxes,
+                                  ["POSSIBLE PHOTO CUT"] * len(tamper_boxes), (0, 0, 255))
+            for idx, banner in enumerate(banner_flags):
+                cv2.putText(img_color, f"WARNING: {banner}", (20, 60 * (idx + 1)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
         return {
             "tamperScore": tamper_score,
             "isTampered": tamper_score >= 30,
             "flags": flags,
+            "regions": tamper_boxes,
         }
     except Exception as exc:
-        return {"tamperScore": 0, "isTampered": False, "flags": [f"TAMPER_DETECTOR_ERROR: {str(exc)}"]}
+        return {"tamperScore": 0, "isTampered": False, "flags": [f"TAMPER_DETECTOR_ERROR: {str(exc)}"], "regions": []}
 
 
-def run_face_match(doc_path, selfie_path):
+def run_face_match(doc_path, selfie_path, img_color=None):
     """YuNet DNN face detection + multi-channel histogram comparison."""
+    face_box = []
     if not selfie_path:
         return {
             "face_score": 100.0,
@@ -199,6 +242,7 @@ def run_face_match(doc_path, selfie_path):
 
         (x1, y1, w1, h1) = doc_faces[0]
         (x2, y2, w2, h2) = selfie_faces[0]
+        face_box = [x1, y1, w1, h1]
 
         crop1 = cv2.resize(doc_img[y1:y1 + h1, x1:x1 + w1], (100, 100))
         crop2 = cv2.resize(selfie_img[y2:y2 + h2, x2:x2 + w2], (100, 100))
@@ -212,30 +256,81 @@ def run_face_match(doc_path, selfie_path):
             correlations.append(cv2.compareHist(hist1, hist2, cv2.HISTCMP_CORREL))
 
         match_score = round(max(0.0, sum(correlations) / len(correlations)) * 100.0, 2)
+
+        # Draw the matched face region if a color canvas was supplied.
+        if img_color is not None and face_box:
+            _annotate_colored(img_color, [face_box],
+                              [f"FACE MATCH {match_score:.0f}%"], (0, 255, 0))
+
         return {
             "face_score": match_score,
             "matched": match_score >= 65.0,
             "skipped": False,
             "details": f"Biometric similarity confidence: {match_score}%",
+            "region": face_box,
         }
     except Exception as exc:
         return {"face_score": 50.0, "matched": False, "skipped": False, "error": str(exc)}
+
+
+def save_annotated_image(image_path, tamper_result, ai_result, face_result):
+    """Overlay all detected regions on a color copy and persist *_annotated.<ext>."""
+    try:
+        import cv2
+        color = cv2.imread(image_path)
+        if color is None:
+            return None
+
+        # AI anomaly ring is a large box; draw it first so later boxes layer above.
+        if ai_result.get("regions"):
+            _annotate_colored(color, ai_result["regions"],
+                              ["AI SPECTRAL ANOMALY"] * len(ai_result["regions"]), (255, 0, 255))
+        if tamper_result.get("regions"):
+            _annotate_colored(color, tamper_result["regions"],
+                              ["POSSIBLE PHOTO CUT"] * len(tamper_result["regions"]), (0, 0, 255))
+        else:
+            for f in (tamper_result.get("flags") or []):
+                if f == "BLURRY_TEXT_OR_UNNATURAL_SMOOTHING":
+                    cv2.putText(color, "WARNING: UNNATURAL SMOOTHING DETECTED", (20, 40),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        if face_result.get("region"):
+            _annotate_colored(color, [face_result["region"]],
+                              [f"FACE MATCH {face_result.get('face_score', 0):.0f}%"], (0, 255, 0))
+
+        out_path = _annotated_output_path(image_path)
+        cv2.imwrite(out_path, color)
+        return out_path
+    except Exception as exc:
+        print(f"WARN: annotation save failed: {exc}", file=sys.stderr)
+        return None
 
 
 def main():
     parser = argparse.ArgumentParser(description="Passport forensic pipeline")
     parser.add_argument("--document", required=True, help="Path to document image")
     parser.add_argument("--selfie", default=None, help="Optional path to selfie image")
+    parser.add_argument("--no-annotate", action="store_true",
+                        help="Skip generating the annotated evidence image")
     args = parser.parse_args()
 
     load_env()
 
+    tamper_result = run_tamper_detection(args.document)
+    ai_result = run_ai_detection(args.document)
+    face_result = run_face_match(args.document, args.selfie)
+
+    annotated_path = None
+    if not args.no_annotate:
+        annotated_path = save_annotated_image(
+            args.document, tamper_result, ai_result, face_result)
+
     result = {
         "document": args.document,
         "ocr": run_ocr(args.document),
-        "ai": run_ai_detection(args.document),
-        "tamper": run_tamper_detection(args.document),
-        "face": run_face_match(args.document, args.selfie),
+        "ai": ai_result,
+        "tamper": tamper_result,
+        "face": face_result,
+        "annotatedImagePath": annotated_path,
     }
     print(json.dumps(result))
 
